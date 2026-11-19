@@ -2,79 +2,95 @@
  * MyST plugin: manim-web
  *
  * Registers the `manim` directive. At build time it emits an anywidget node
- * that carries the user's animation code and canvas options as model data.
- * The browser-side widget (widget.mjs) picks those up and runs manim-web.
+ * that carries the scene code, canvas options and the colour palette as model
+ * data. The browser side is dist/manim-widget.bundle.mjs (manim-widget.mjs +
+ * vendored manim-web, built by scripts/build.sh); no CDN is used.
  *
- * Usage:
+ * Usage (inside a figure, so it gets a label, caption and a static PDF version):
  *
- *   :::{manim}
- *   :width: 800
- *   :height: 450
- *   :background-color: '#1e1e2e'
- *
- *   const circle = new Circle({ color: RED, fillOpacity: 0.3 });
- *   scene.add(circle);
- *   await scene.play(new Create(circle));
- *   await scene.wait(1);
- *   await scene.play(new FadeOut(circle));
+ *   :::{figure}
+ *   :label: fig-example
+ *   :placeholder: ../100_figures/manim/example.pdf
+ *   ```{manim}
+ *   :file: ../100_figures/manim/example.js
+ *   :width: 960
+ *   :height: 540
+ *   ```
+ *   Caption text.
  *   :::
+ *
+ * Scene code gets `scene`, `THEME` (palette colours plus `bg`, `fg`) and every
+ * manim-web export in scope; it runs inside an async function.
+ *
+ * Palette: semantic colour names -> hex, read from the file named by the
+ * environment variable MANIM_PALETTE, else from `101_style/src/theme_default.yaml`
+ * relative to the directory `myst` runs in (the thesis layout). In the page, a
+ * CSS custom property `--<name>` overrides each entry, so the live scene follows
+ * the site theme, including dark mode.
  */
 import fs from 'fs';
 import path from 'path';
 
-const PLUGIN_PATH = new URL(import.meta.url).pathname;
-const WIDGET_PATH = PLUGIN_PATH.replace(/\/[^/]*$/, "/manim-widget.mjs");
+const PLUGIN_DIR = path.dirname(new URL(import.meta.url).pathname);
+const WIDGET_PATH = path.join(PLUGIN_DIR, 'dist', 'manim-widget.bundle.mjs');
+// LaTeX rendering for MathTex: a separate file, copied into the site by MyST
+// (model `$asset`) and only downloaded by browsers when a scene uses MathTex.
+const VENDOR_DIR = path.join(PLUGIN_DIR, 'vendor', 'manim-web');
+const MATHJAX_PATH = fs.existsSync(VENDOR_DIR)
+  ? fs.readdirSync(VENDOR_DIR).filter((f) => /^MathJaxBundle-.*\.js$/.test(f)).map((f) => path.join(VENDOR_DIR, f))[0]
+  : undefined;
 
 function relativePath(fromDir, toFile) {
-  const from = fromDir.split("/").filter(Boolean);
-  const to = toFile.split("/").filter(Boolean);
-  let i = 0;
-  while (i < from.length && i < to.length && from[i] === to[i]) i++;
-  return [...Array(from.length - i).fill(".."), ...to.slice(i)].join("/") || ".";
+  return path.relative(fromDir, toFile).split(path.sep).join('/') || '.';
 }
- 
+
+/** `name: "#rrggbb"` lines (YAML) or a JSON object. */
+function readPalette() {
+  const file = process.env.MANIM_PALETTE ?? path.resolve('101_style/src/theme_default.yaml');
+  if (!fs.existsSync(file)) return {};
+  const text = fs.readFileSync(file, 'utf8');
+  if (file.endsWith('.json')) return JSON.parse(text);
+  const out = {};
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*-?\s*([\w-]+):\s*["']?(#[0-9a-fA-F]{6})["']?\s*$/);
+    if (m && m[1] !== 'rgb') out[m[1]] = m[2];
+  }
+  return out;
+}
+
+let PALETTE = null;
+
 const manimDirective = {
   name: 'manim',
-  doc: `Embed an interactive manim-web animation.
-Write only the animation body — \`scene\` and all manim-web exports
-(shapes, animations, colors, rate-functions) are already in scope.`,
+  doc: `Embed a manim-web scene. Write only the scene body: \`scene\`, \`THEME\`
+and all manim-web exports are in scope.`,
 
   body: {
     type: String,
-    doc: 'Animation code. `scene` plus all manim-web exports are pre-imported. Omit when using `:file:`.',
+    doc: 'Scene code. Omit when using `:file:`.',
   },
 
   options: {
-    width: {
-      type: Number,
-      doc: 'Canvas width in pixels (default: 800).',
-    },
-    height: {
-      type: Number,
-      doc: 'Canvas height in pixels (default: 450).',
-    },
-    'background-color': {
-      type: String,
-      doc: "Background color as a CSS hex string, e.g. '#1e1e2e' (default: '#000000').",
-    },
-    scene: {
-      type: String,
-      doc: "Scene class to use: 'Scene' (default) or 'ThreeDScene' for 3D with orbit controls.",
-    },
     file: {
       type: String,
-      doc: 'Path to a .js file containing the animation code, relative to the document. When set, the directive body is ignored.',
+      doc: 'Path to a .js file with the scene code, relative to the document. Overrides the body.',
     },
-    'show-player': {
-      type: Boolean,
-      doc: 'When true, renders a player bar below the animation with play/pause, restart, and a seekable progress bar.',
+    width: { type: Number, doc: 'Logical canvas width in px (default 960); the canvas scales down to the column.' },
+    height: { type: Number, doc: 'Logical canvas height in px (default 540).' },
+    background: {
+      type: String,
+      doc: 'Fixed background colour. Default: the page background (follows light/dark mode).',
     },
+    'background-color': { type: String, doc: 'Deprecated alias of `background`.' },
+    scene: { type: String, doc: "'Scene' (default) or 'ThreeDScene'." },
+    'show-player': { type: Boolean, doc: 'Show restart and pause buttons below the scene.' },
   },
 
   run(data, vfile) {
     const { body, options } = data;
-    const fromDir = vfile.path.replace(/\/[^/]*$/, "");
+    const fromDir = path.dirname(vfile.path);
     const esm = relativePath(fromDir, WIDGET_PATH);
+    PALETTE ??= readPalette();
 
     let code = body ?? '';
     if (options?.file) {
@@ -85,9 +101,11 @@ Write only the animation body — \`scene\` and all manim-web exports
         vfile.message(`manim: could not read file "${options.file}": ${err.message}`, data.node);
       }
     }
-
     if (!code.trim()) {
-      vfile.message('manim: no animation code provided (use directive body or :file: option)', data.node);
+      vfile.message('manim: no scene code (use the directive body or :file:)', data.node);
+    }
+    if (!fs.existsSync(WIDGET_PATH)) {
+      vfile.message(`manim: widget bundle missing (${WIDGET_PATH}); run scripts/build.sh in the plugin`, data.node);
     }
 
     return [
@@ -96,11 +114,13 @@ Write only the animation body — \`scene\` and all manim-web exports
         esm,
         model: {
           code,
-          width: options?.width ?? 800,
-          height: options?.height ?? 450,
-          backgroundColor: options?.['background-color'] ?? '#000000',
+          width: options?.width ?? 960,
+          height: options?.height ?? 540,
+          background: options?.background ?? options?.['background-color'] ?? null,
           sceneType: options?.scene ?? 'Scene',
           showPlayer: options?.['show-player'] ?? false,
+          palette: PALETTE,
+          ...(MATHJAX_PATH ? { mathjax: { $asset: relativePath(fromDir, MATHJAX_PATH) } } : {}),
         },
       },
     ];

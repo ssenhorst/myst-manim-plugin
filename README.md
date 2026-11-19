@@ -12,6 +12,41 @@ See some examples of animations and the code [here](https://dobbikov.github.io/m
 
 > This plugin was presented and contributed to `myst-plugins` during #myst-education-2026.
 
+## This fork (branch `thesis-adaptations`)
+
+Changes for use in a thesis with a web and a PDF version. The sections further
+down describe the upstream plugin; where they differ, this section wins.
+
+- **No CDN.** `manim-web` 0.42.0 is vendored in `vendor/manim-web/` (MIT, see
+  `vendor/manim-web/VERSION`) and bundled with the widget into
+  `dist/manim-widget.bundle.mjs` by `scripts/build.sh` (needs `esbuild`). The
+  plugin points MyST at that bundle, so copy the whole folder, not two files.
+  LaTeX (`MathTex`) uses a separate 12 MB MathJax file that MyST copies into the
+  site and browsers load only for scenes that use it.
+- **Theme colours.** Scenes get `THEME`: the palette read from
+  `$MANIM_PALETTE` or `101_style/src/theme_default.yaml`, overridden in the page
+  by CSS custom properties `--<name>`, plus `THEME.bg` and `THEME.fg` (page
+  background and text colour). Use `THEME.fg` instead of black so dark mode
+  works; the scene restarts when the page switches light/dark.
+- **Responsive.** `:width:`/`:height:` (default 960×540) set the logical size;
+  the canvas scales down to the column.
+- **Options.** `:background:` (fixed background; default follows the page),
+  `:show-player:` (restart and pause buttons; the upstream seek bar is gone),
+  `:file:`, `:scene:`.
+- **Figures.** Put the directive inside `:::{figure}` with `:label:` and a
+  `:placeholder:` image: the HTML shows the live scene, the PDF shows the
+  placeholder.
+- **Headless render** (`scripts/render.mjs`, see its header): one scene file to
+  a vector SVG still (in the default palette, for a figure-styling pipeline),
+  a PNG still, and light and dark MP4 videos (H.264), using headless Chrome.
+  A fake clock makes every video frame exactly 1/fps apart.
+  `scripts/screenshot.mjs` screenshots a built page in light or dark mode.
+- **Scope.** Every `manim-web` export is in scope (not a fixed list).
+
+Known limits: `Text` is drawn as a canvas texture and is missing from the SVG
+export (use `MathTex`, with `\text{}` for words). 3D meshes are not exported to
+SVG. Pause takes effect between animations.
+
 ## Installation
 
 ### MyST HTML / Jupyter Book
