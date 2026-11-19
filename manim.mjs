@@ -19,8 +19,10 @@
  *   Caption text.
  *   :::
  *
- * Scene code gets `scene`, `THEME` (palette colours plus `bg`, `fg`) and every
- * manim-web export in scope; it runs inside an async function.
+ * Scene code gets `scene`, `THEME` (palette colours plus `bg`, `fg`), `mark(name)`
+ * (records a named point in scene time) and every manim-web export in scope; it
+ * runs inside an async function. The widget's control state (time, playing,
+ * progress, ...) is documented in manim-widget.mjs.
  *
  * Palette: semantic colour names -> hex, read from the file named by the
  * environment variable MANIM_PALETTE, else from `101_style/src/theme_default.yaml`
@@ -83,7 +85,10 @@ and all manim-web exports are in scope.`,
     },
     'background-color': { type: String, doc: 'Deprecated alias of `background`.' },
     scene: { type: String, doc: "'Scene' (default) or 'ThreeDScene'." },
-    'show-player': { type: Boolean, doc: 'Show restart and pause buttons below the scene.' },
+    'show-player': { type: Boolean, doc: 'Show restart, play/pause and a seek bar below the scene.' },
+    autoplay: { type: Boolean, doc: 'Start playing when visible (default true). Initial value of the `playing` model key.' },
+    loop: { type: Boolean, doc: 'Restart at the end (default false).' },
+    start: { type: Number, doc: 'Scene time in seconds to open at (default 0). Initial value of the `time` model key.' },
   },
 
   run(data, vfile) {
@@ -120,6 +125,15 @@ and all manim-web exports are in scope.`,
           sceneType: options?.scene ?? 'Scene',
           showPlayer: options?.['show-player'] ?? false,
           palette: PALETTE,
+          // control state (see manim-widget.mjs): inputs and outputs of the widget
+          playing: options?.autoplay ?? true,
+          loop: options?.loop ?? false,
+          time: options?.start ?? 0,
+          speed: 1,
+          progress: 0,
+          duration: null,
+          markers: [],
+          done: false,
           ...(MATHJAX_PATH ? { mathjax: { $asset: relativePath(fromDir, MATHJAX_PATH) } } : {}),
         },
       },

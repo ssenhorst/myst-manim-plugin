@@ -43,6 +43,40 @@ down describe the upstream plugin; where they differ, this section wins.
   `scripts/screenshot.mjs` screenshots a built page in light or dark mode.
 - **Scope.** Every `manim-web` export is in scope (not a fixed list).
 
+### Control interface (anywidget model)
+
+The widget keeps its playback state in the anywidget model, so anything that
+holds the model (a notebook, another widget, a scroll handler) can drive it with
+`model.set(key, value)` and follow it with `model.on('change:key', ...)`:
+
+| key | direction | meaning |
+|---|---|---|
+| `time` | in/out | scene time (s); setting it seeks |
+| `progress` | in/out | `time / duration` in [0, 1]; setting it seeks |
+| `playing` | in/out | play/pause (initial: `:autoplay:`, default true) |
+| `speed` | in | playback rate (default 1) |
+| `loop` | in | restart at the end (`:loop:`) |
+| `duration` | out | total scene time; known after one full run or a seek past the end |
+| `markers` | out | `[{name, time}]` from `mark('name')` calls in the scene code |
+| `done` | out | the scene code has finished at the current time |
+
+`:start:` sets the initial `time`. With `:show-player:` the widget shows
+restart, play/pause and a seek bar bound to the same state.
+
+How seeking works: the widget drives the scene on its own clock
+(`SceneDriver` in `manim-core.mjs`): the scene's render loop is off, the widget
+steps it with `scene._tickFrame(dt)`, `scene.wait(t)` becomes a `Wait`
+animation, and the clock holds while text and MathTex finish rendering. Seeking
+forward steps without drawing; seeking back restarts the code and fast-forwards
+(cost: the scene's own per-frame work up to the target time). This uses manim-web
+0.42 internals; check `SceneDriver` when updating manim-web. Test:
+`node scripts/test-widget.mjs --scene fig.js --palette theme.yaml --out DIR`.
+
+In MyST the model is private to each widget: the theme creates it inside the
+renderer and does not expose it, and its `save_changes`/`off` throw (the widget
+only uses `get`, `set`, `on`). A controller in a *different* widget therefore
+cannot reach this model yet; see the project notes for options.
+
 Known limits: `Text` is drawn as a canvas texture and is missing from the SVG
 export (use `MathTex`, with `\text{}` for words). 3D meshes are not exported to
 SVG. Pause takes effect between animations.
